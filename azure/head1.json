@@ -1,0 +1,183 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "ssh-key": {
+            "type": "string",
+            "metadata": {
+                "description": "SSH key to access gateway with"
+            }
+        },
+        "image-path": {
+            "type": "string",
+            "metadata":  {
+                "description": "Image resource path"
+            }
+        },
+        "clustername": {
+            "type": "string"
+        }
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2020-05-01",
+            "name": "head1pri",
+            "location": "[resourceGroup().location]",
+            "tags": {
+                "project": "[parameters('clustername')]",
+                "type": "core"
+            },
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "head1priip",
+                        "properties": {
+                            "privateIPAddress": "10.110.1.200",
+                            "privateIPAllocationMethod": "Static",
+                            "subnet": {
+                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'cluster', 'cluster-pri1')]"
+                            },
+                            "privateIPAddressVersion": "IPv4"
+                        }
+                    }
+                ],
+                "dnsSettings": {
+                    "dnsServers": []
+                },
+                "enableAcceleratedNetworking": false,
+                "enableIPForwarding": true,
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', 'cluster-private')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "head1pubIP",
+            "apiVersion": "2017-03-01",
+            "location": "[resourceGroup().location]",
+            "tags": {
+                "project": "[parameters('clustername')]",
+                "type": "core"
+            },
+            "properties": {
+                "publicIPAllocationMethod": "Static",
+                "idleTimeoutInMinutes": 30
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2020-05-01",
+            "name": "head1dmz",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses', 'head1pubIP')]"
+            ],
+            "tags": {
+                "type": "core"
+            },
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "head1dmzip",
+                        "properties": {
+                            "privateIPAddress": "10.110.0.200",
+                            "privateIPAllocationMethod": "Static",
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIpAddresses', 'head1pubIP')]"
+                            },
+                            "subnet": {
+                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'cluster', 'cluster-dmz')]"
+                            },
+                            "privateIPAddressVersion": "IPv4"
+                        }
+                    }
+                ],
+                "dnsSettings": {
+                    "dnsServers": []
+                },
+                "enableAcceleratedNetworking": false,
+                "enableIPForwarding": true,
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', 'cluster-dmz')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2019-07-01",
+            "name": "head1",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/networkInterfaces', 'head1pri')]",
+                "[resourceId('Microsoft.Network/networkInterfaces', 'head1dmz')]"
+            ],
+            "tags": {
+                "type": "core"
+            },
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "Standard_DS1_v2"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "id": "[parameters('image-path')]"
+                    },
+                    "osDisk": {
+                        "osType": "Linux",
+                        "name": "head1OSdisk",
+                        "createOption": "FromImage",
+                        "caching": "ReadWrite",
+                        "DiskSizeGB": 48,
+                        "managedDisk": {
+                            "storageAccountType": "Premium_LRS"
+                        }
+                    },
+                    "dataDisks": [
+                        {
+                        "name": "export",
+                        "diskSizeGB": "256",
+                        "lun": "0",
+                        "createOption": "empty"
+                        }
+                    ]
+                },
+                "osProfile": {
+                    "computerName": "[concat('head1.cloud1.pri.', parameters('clustername'), '.cluster.network')]",
+                    "adminUsername": "flight",
+                    "linuxConfiguration": {
+                        "disablePasswordAuthentication": true,
+                        "ssh": {
+                            "publicKeys": [
+                                {
+                                    "path": "/home/flight/.ssh/authorized_keys",
+                                    "keyData": "[parameters('ssh-key')]"
+                                }
+                            ]
+                        },
+                        "provisionVMAgent": true
+                    },
+                    "secrets": [],
+                    "allowExtensionOperations": true
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', 'head1pri')]",
+                            "properties": {
+                                "primary": false
+                            }
+                        },
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', 'head1dmz')]",
+                            "properties": {
+                                "primary": true
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}
